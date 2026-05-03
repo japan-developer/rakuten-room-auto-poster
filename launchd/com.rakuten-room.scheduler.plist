@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- このサービスを識別するラベル -->
+    <key>Label</key>
+    <string>com.rakuten-room.scheduler</string>
+
+    <!-- 実行するコマンド: node <project>/src/cli.mjs scheduler -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>__NODE_PATH__</string>
+        <string>__PROJECT_PATH__/src/cli.mjs</string>
+        <string>scheduler</string>
+    </array>
+
+    <!-- 作業ディレクトリ -->
+    <key>WorkingDirectory</key>
+    <string>__PROJECT_PATH__</string>
+
+    <!-- Mac起動時に自動起動 -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- 落ちたら自動再起動 -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- 再起動の最低間隔（秒）— あまり頻繁な再起動を防ぐ -->
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <!-- 標準出力ログ -->
+    <key>StandardOutPath</key>
+    <string>__PROJECT_PATH__/launchd/scheduler.log</string>
+
+    <!-- エラーログ -->
+    <key>StandardErrorPath</key>
+    <string>__PROJECT_PATH__/launchd/scheduler-error.log</string>
+
+    <!-- 環境変数: PATH を継承（npm でインストールしたコマンドを使えるように） -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:__HOME_PATH__/.local/bin</string>
+        <key>HOME</key>
+        <string>__HOME_PATH__</string>
+    </dict>
+</dict>
+</plist>

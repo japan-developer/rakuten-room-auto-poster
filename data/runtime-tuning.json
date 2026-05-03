@@ -1,0 +1,32 @@
+{
+  "weekStart": "2026-01-01",
+  "updatedAt": "2026-01-01T00:00:00.000Z",
+  "comment": {
+    "targetCharsMin": 80,
+    "targetCharsMax": 160,
+    "useEmoji": true,
+    "priceMentionProb": 0.3
+  },
+  "hashtags": {
+    "topPerforming": []
+  },
+  "posting": {
+    "bestHoursJst": [9, 12, 20]
+  },
+  "genre": {
+    "boost": [],
+    "reduce": []
+  },
+  "priceRangeHint": {
+    "min": 1001,
+    "max": 5000
+  },
+  "seasonal": {
+    "keywords": [],
+    "updatedMonth": "2026-01"
+  },
+  "evergreen": {
+    "keywords": []
+  },
+  "notes": "セットアップ完了。初回の週次レビュー後にこのフィールドが運用ジャーナルとして埋まっていきます。"
+}

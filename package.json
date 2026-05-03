@@ -1,0 +1,28 @@
+{
+  "name": "rakuten-room-auto-poster",
+  "version": "1.0.0",
+  "description": "楽天ROOM 自動投稿・自動改善エージェント (Claude Code 駆動)",
+  "type": "module",
+  "main": "src/cli.mjs",
+  "scripts": {
+    "start": "node src/cli.mjs",
+    "scheduler": "node src/cli.mjs scheduler",
+    "post": "node src/cli.mjs post",
+    "collect": "node src/cli.mjs collect",
+    "engage": "node src/cli.mjs engage",
+    "analyze": "node src/cli.mjs analyze",
+    "status": "node src/cli.mjs status",
+    "init-keywords": "node src/cli.mjs init-keywords",
+    "init-genres": "node src/cli.mjs init-genres",
+    "smoke": "node scripts/agent.mjs smoke"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "dotenv": "^16.4.5",
+    "playwright": "^1.48.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "SEE LICENSE IN LICENSE"
+}
