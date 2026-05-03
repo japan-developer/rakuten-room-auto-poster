@@ -6,7 +6,6 @@ function apiParams() {
   return new URLSearchParams({
     applicationId: config.rakutenAppId,
     accessKey: config.rakutenAccessKey,
-    affiliateId: config.rakutenAffiliateId,
     formatVersion: '2',
   });
 }

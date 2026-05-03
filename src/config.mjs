@@ -12,7 +12,6 @@ export const config = {
   roomUserId: process.env.ROOM_USER_ID,
   rakutenAppId: process.env.RAKUTEN_APP_ID,
   rakutenAccessKey: process.env.RAKUTEN_ACCESS_KEY,
-  rakutenAffiliateId: process.env.RAKUTEN_AFFILIATE_ID,
 
   // Paths
   rootDir: ROOT_DIR,
