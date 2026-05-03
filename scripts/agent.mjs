@@ -8,12 +8,12 @@
  *   smoke  — connectivity check (2 min)
  *
  * Subscription auth is enforced by stripping any ANTHROPIC_API_KEY /
- * ANTHROPIC_AUTH_TOKEN from the spawned env. ~/.claude/.credentials.json
- * (Pro/Max sub) is read via the inherited HOME.
+ * ANTHROPIC_AUTH_TOKEN from the spawned env, then verifying that the
+ * `claude` binary is available and runnable. Claude Code 2.x stores
+ * credentials in macOS Keychain rather than a credentials.json file.
  */
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -67,9 +67,17 @@ function recordStart(role) {
 }
 
 function assertSubscriptionAuth() {
-  const credPath = path.join(os.homedir(), '.claude', '.credentials.json');
-  if (!fs.existsSync(credPath)) {
-    console.error(`[agent] FATAL: ~/.claude/.credentials.json not found. Subscription auth required.`);
+  // Claude Code 2.x ではキーチェーンに認証情報が保存されるため、
+  // credentials.json の存在確認ではなく claude コマンドの動作確認で代替する。
+  // claude --version が成功すれば、Claude Code がインストールされていて
+  // 認証ファイル/キーチェーンが利用可能な状態であると判断する。
+  try {
+    execSync('claude --version', { stdio: 'ignore', timeout: 10_000 });
+  } catch (err) {
+    console.error(`[agent] FATAL: 'claude' command not available or not authenticated.`);
+    console.error(`[agent]   Please ensure Claude Code is installed and you have logged in:`);
+    console.error(`[agent]     npm install -g @anthropic-ai/claude-code`);
+    console.error(`[agent]     claude  (and complete the sign-in flow)`);
     process.exit(2);
   }
 }
