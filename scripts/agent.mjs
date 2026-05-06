@@ -153,6 +153,8 @@ async function main() {
     '--add-dir', ROOT,
     '--permission-mode', cfg.permissionMode,
     '--allowedTools', cfg.allowedTools.join(' '),
+    '--tools', cfg.allowedTools.join(','),
+    '--strict-mcp-config',
   ];
   if (cfg.verbose) args.push('--verbose');
 
