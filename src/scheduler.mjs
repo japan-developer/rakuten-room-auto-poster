@@ -44,7 +44,7 @@ function getJobs() {
       label: 'Post 09:00 朝',
       cmd: ['post', '--count', String(config.schedule.postCounts[0])],
       due: (jstH, jstM) => jstH === 9 && jstM === 0,
-      catchUpUntil: (jstH) => jstH < 12,
+      catchUpUntil: (jstH, jstM, jstDow) => jstH < 12,
       statusKey: 'post',
     },
     {
@@ -52,7 +52,7 @@ function getJobs() {
       label: 'Post 12:30 昼',
       cmd: ['post', '--count', String(config.schedule.postCounts[1])],
       due: (jstH, jstM) => jstH === 12 && jstM === 30,
-      catchUpUntil: (jstH) => jstH < 18,
+      catchUpUntil: (jstH, jstM, jstDow) => jstH < 18,
       statusKey: 'post',
     },
     {
@@ -60,7 +60,7 @@ function getJobs() {
       label: 'Post 20:00 夜',
       cmd: ['post', '--count', String(config.schedule.postCounts[2])],
       due: (jstH, jstM) => jstH === 20 && jstM === 0,
-      catchUpUntil: (jstH) => jstH < 23,
+      catchUpUntil: (jstH, jstM, jstDow) => jstH < 23,
       statusKey: 'post',
     },
     {
@@ -68,7 +68,7 @@ function getJobs() {
       label: 'Collect 21:00',
       cmd: ['collect'],
       due: (jstH, jstM) => jstH === 21 && jstM === 0,
-      catchUpUntil: (jstH) => jstH < 23 || jstH < 4,
+      catchUpUntil: (jstH, jstM, jstDow) => jstH < 23 || jstH < 4,
       statusKey: 'collect',
     },
     {
@@ -76,7 +76,7 @@ function getJobs() {
       label: 'Engage 22:00',
       cmd: ['engage'],
       due: (jstH, jstM) => jstH === 22 && jstM === 0,
-      catchUpUntil: (jstH) => jstH < 23,
+      catchUpUntil: (jstH, jstM, jstDow) => jstH < 23,
       statusKey: 'engage',
     },
     {
@@ -84,7 +84,7 @@ function getJobs() {
       label: 'Analyze (Sat 06:00)',
       cmd: ['analyze'],
       due: (jstH, jstM, jstDow) => jstDow === 6 && jstH === 6 && jstM === 0,
-      catchUpUntil: () => false,
+      catchUpUntil: (jstH, jstM, jstDow) => jstDow === 6,
       statusKey: 'analyze',
       isWeekly: true,
     },
@@ -170,18 +170,15 @@ function tick() {
   for (const job of getJobs()) {
     if (alreadyRanToday(job, status)) continue;
 
-    if (job.isWeekly && !job.due(jst.hour, jst.minute, jst.dow)) continue;
-
     if (job.due(jst.hour, jst.minute, jst.dow)) {
       spawnJob(job);
       continue;
     }
 
-    if (!job.isWeekly && job.catchUpUntil(jst.hour)) {
-      const dueHour = getDueHourMin(job).h;
-      const dueMin = getDueHourMin(job).m;
-      if (jst.hour > dueHour || (jst.hour === dueHour && jst.minute > dueMin)) {
-        log(`Catch-up: ${job.label} missed at JST ${dueHour}:${String(dueMin).padStart(2, '0')}, running now`);
+    if (job.catchUpUntil(jst.hour, jst.minute, jst.dow)) {
+      const dueT = getDueHourMin(job);
+      if (jst.hour > dueT.h || (jst.hour === dueT.h && jst.minute > dueT.m)) {
+        log(`Catch-up: ${job.label} missed at JST ${dueT.h}:${String(dueT.m).padStart(2, '0')}, running now`);
         spawnJob(job);
       }
     }
@@ -189,9 +186,12 @@ function tick() {
 }
 
 function getDueHourMin(job) {
+  // weekly job の場合、dow=6 (土曜) で判定。
+  // daily job の場合、due 関数は dow を見ないので任意の値で OK。
+  const testDow = job.isWeekly ? 6 : 0;
   for (let h = 0; h < 24; h++) {
     for (const m of [0, 30]) {
-      if (job.due(h, m, 0)) return { h, m };
+      if (job.due(h, m, testDow)) return { h, m };
     }
   }
   return { h: 0, m: 0 };
