@@ -81,7 +81,11 @@ function recordStart(role) {
  * =================================================================== */
 function assertClaudeAuth() {
   try {
-    execSync('claude --version', { stdio: 'ignore', timeout: 10_000 });
+    execSync('claude --version', {
+      stdio: 'ignore',
+      timeout: 10_000,
+      shell: process.platform === 'win32',
+    });
   } catch (err) {
     console.error(`[agent] FATAL: 'claude' command not available or not authenticated.`);
     console.error(`[agent]   Please ensure Claude Code is installed and you have logged in:`);
@@ -116,6 +120,9 @@ function spawnClaude(role, cfg, promptText, logStream, logPath, extraArgs) {
     cwd: ROOT,
     env,
     stdio: ['pipe', 'pipe', 'inherit'],
+    // Windows では claude が claude.cmd / claude.ps1 のシムで提供されることがあり、
+    // shell: true を経由しないと spawn ENOENT になる。Mac/Linux では影響なし。
+    shell: process.platform === 'win32',
   });
 
   child.stdin.write(promptText);
@@ -142,7 +149,11 @@ function spawnClaude(role, cfg, promptText, logStream, logPath, extraArgs) {
  * =================================================================== */
 function assertCodexAuth() {
   try {
-    execSync('codex --version', { stdio: 'ignore', timeout: 10_000 });
+    execSync('codex --version', {
+      stdio: 'ignore',
+      timeout: 10_000,
+      shell: process.platform === 'win32',
+    });
   } catch (err) {
     console.error(`[agent] FATAL: 'codex' command not available.`);
     console.error(`[agent]   Please ensure Codex CLI is installed:`);
@@ -197,6 +208,9 @@ function spawnCodex(role, cfg, promptText, logStream, logPath, extraArgs) {
     cwd: ROOT,
     env,
     stdio: ['pipe', 'pipe', 'inherit'],
+    // Windows では codex が codex.cmd / codex.ps1 のシムで提供されることがあり、
+    // shell: true を経由しないと spawn ENOENT になる。Mac/Linux では影響なし。
+    shell: process.platform === 'win32',
   });
 
   child.stdin.write(promptText);
