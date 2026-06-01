@@ -13,6 +13,7 @@ import { config } from '../src/config.mjs';
 import db, {
   insertPost,
   markProductPosted,
+  markProductSoldOut,
   getTodayPostCount,
 } from '../src/db.mjs';
 
@@ -71,13 +72,16 @@ async function main() {
   const results = [];
   let posted = 0;
   let failed = 0;
+  let soldOut = 0;
+  let alreadyCollected = 0;
+  const requested = slice.length;
 
   if (opts.dryRun) {
     for (const item of slice) {
       const p = getProductById(item.product_id);
       results.push({ product_id: item.product_id, ok: true, dryRun: true, item: p?.item_name?.slice(0, 50) });
     }
-    process.stdout.write(JSON.stringify({ posted: 0, failed: 0, dryRun: true, results }) + '\n');
+    process.stdout.write(JSON.stringify({ posted: 0, failed: 0, sold_out: 0, requested, dryRun: true, results }) + '\n');
     return;
   }
 
@@ -106,11 +110,23 @@ async function main() {
         posted++;
         results.push({ product_id: product.id, ok: true, room_url: roomUrl });
       } catch (err) {
-        failed++;
-        console.error(`[post-batch] failed: ${err.message}`);
-        results.push({ product_id: product.id, ok: false, error: err.message });
-        if (err.message.includes('重複操作') || err.message.includes('R200')) {
+        if (err.code === 'SOLD_OUT') {
+          soldOut++;
+          console.error(`[post-batch] SOLD_OUT: ${product.item_name.slice(0, 50)}`);
+          try { markProductSoldOut(product.id); } catch {}
+          results.push({ product_id: product.id, ok: false, sold_out: true, error: 'SOLD_OUT' });
+        } else if (err.code === 'ALREADY_COLLECTED') {
+          alreadyCollected++;
+          console.error(`[post-batch] ALREADY_COLLECTED: ${product.item_name.slice(0, 50)}`);
           try { markProductPosted(product.id); } catch {}
+          results.push({ product_id: product.id, ok: false, already_collected: true, error: 'ALREADY_COLLECTED' });
+        } else {
+          failed++;
+          console.error(`[post-batch] failed: ${err.message}`);
+          results.push({ product_id: product.id, ok: false, error: err.message });
+          if (err.message.includes('重複操作') || err.message.includes('R200')) {
+            try { markProductPosted(product.id); } catch {}
+          }
         }
         try { await page.waitForTimeout(5000); } catch {}
       }
@@ -123,7 +139,7 @@ async function main() {
     try { await browser.close(); } catch {}
   }
 
-  process.stdout.write(JSON.stringify({ posted, failed, results }) + '\n');
+  process.stdout.write(JSON.stringify({ posted, failed, sold_out: soldOut, already_collected: alreadyCollected, requested, results }) + '\n');
   if (posted === 0) process.exit(1);
 }
 

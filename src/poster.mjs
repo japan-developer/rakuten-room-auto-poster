@@ -1,3 +1,4 @@
+import fs from 'fs';
 import { ensureAuthenticated } from './auth.mjs';
 import { config } from './config.mjs';
 
@@ -10,6 +11,16 @@ export async function postToRoom(page, product, comment, hashtags) {
 
   if (!page.url().includes('item.rakuten.co.jp')) {
     throw new Error('Product page redirected (likely discontinued): ' + page.url());
+  }
+
+  const isSoldOut = await page.evaluate(() => {
+    return (document.body.innerText || '').includes('この商品は売り切れです');
+  }).catch(() => false);
+
+  if (isSoldOut) {
+    const err = new Error('SOLD_OUT: この商品は売り切れです');
+    err.code = 'SOLD_OUT';
+    throw err;
   }
 
   const roomLink = await page.$eval(
@@ -35,6 +46,20 @@ export async function postToRoom(page, product, comment, hashtags) {
     }
   }
   await page.waitForTimeout(5000);
+
+  // 「すでにコレ！している商品です」モーダル検知
+  const alreadyModal = page.locator('div.dialog-container.modal-popup:has-text("すでにコレ"), div:has-text("すでにコレ！している商品です")').first();
+  const isAlready = await alreadyModal.isVisible().catch(() => false);
+  if (isAlready) {
+    console.log('[poster] ALREADY_COLLECTED modal detected, dismissing...');
+    const okBtn = page.locator('div.dialog-container.modal-popup button:has-text("OK"), button:has-text("OK"):visible').first();
+    await okBtn.click({ timeout: 5000 }).catch((e) => {
+      console.error(`[poster] could not click OK on modal: ${e.message.split('\n')[0]}`);
+    });
+    const err = new Error('ALREADY_COLLECTED: item already exists in ROOM');
+    err.code = 'ALREADY_COLLECTED';
+    throw err;
+  }
 
   try {
     await page.waitForSelector('.collect-item-name, [class*="itemName"], h1, h2', {
@@ -65,7 +90,41 @@ export async function postToRoom(page, product, comment, hashtags) {
     { timeout: 30000 }
   ).catch(() => null);
 
-  await doneButton.click();
+  try {
+    await doneButton.click();
+  } catch (clickErr) {
+    const failDir = `${config.screenshotsDir}/failures`;
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const failPath = `${failDir}/post_fail_${product.id}_${stamp}.png`;
+    const overlayInfo = await page.evaluate(() => {
+      const sel = 'div.background, .modal-backdrop, [class*="overlay"], [class*="backdrop"], [class*="modal"]';
+      const els = Array.from(document.querySelectorAll(sel));
+      return els.slice(0, 20).map(el => {
+        const cs = getComputedStyle(el);
+        const r = el.getBoundingClientRect();
+        return {
+          tag: el.tagName,
+          className: el.className,
+          display: cs.display,
+          visibility: cs.visibility,
+          opacity: cs.opacity,
+          zIndex: cs.zIndex,
+          pointerEvents: cs.pointerEvents,
+          position: cs.position,
+          rect: { x: r.x, y: r.y, w: r.width, h: r.height },
+        };
+      });
+    }).catch((e) => ({ error: e.message }));
+    try {
+      fs.mkdirSync(failDir, { recursive: true });
+      await page.screenshot({ path: failPath, fullPage: true });
+      console.error(`[poster] Click FAILED, screenshot: ${failPath}`);
+      console.error(`[poster] Overlay diagnostic: ${JSON.stringify(overlayInfo)}`);
+    } catch (ssErr) {
+      console.error(`[poster] Could not save failure screenshot: ${ssErr.message}`);
+    }
+    throw clickErr;
+  }
   console.log(`[poster] Clicked 完了, waiting for /api/collect response...`);
 
   const collectResp = await collectPromise;

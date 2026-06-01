@@ -16,8 +16,10 @@ import {
   getActiveGenres,
   getLatestStrategy,
   getTodayPostCount,
+  getPostedItemCodes,
+  extractItemCode,
 } from '../src/db.mjs';
-import { fetchRanking, searchProductsAPI } from '../src/searcher.mjs';
+import { fetchRanking } from '../src/searcher.mjs';
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -67,50 +69,51 @@ async function main() {
     : config.strategy;
 
   const rawPrice = strategyConfig.priceRange || {};
-  const priceFilter = { priceMin: rawPrice.min, priceMax: rawPrice.max };
+  const reviewFilter = tuning.productFilter || {};
+  const productFilter = {
+    priceMin: rawPrice.min,
+    priceMax: rawPrice.max,
+    minReviewCount: reviewFilter.minReviewCount,
+    minReviewAverage: reviewFilter.minReviewAverage,
+  };
 
   const collected = [];
   const seenShops = new Set();
+  const seenItemCodes = new Set();
   const genrePostCounts = new Map();
+  const excludedGenres = new Set(config.excludedGenreIds || []);
+  // ROOM側で「すでにコレ！」判定される商品の予防除外
+  const blockedItemCodes = getPostedItemCodes();
+
+  function filterPool(pool) {
+    // SQL の posted=0 を満たしていても、同 ROOM itemcode が投稿済のものは弾く
+    return pool.filter(p => {
+      const code = extractItemCode(p.item_url);
+      return !code || !blockedItemCodes.has(code);
+    });
+  }
 
   function pushIfNew(p, tag) {
+    if (p.genre_id && excludedGenres.has(p.genre_id)) return false;
     const shopKey = (p.shop_display_name || p.shop_name || '').toLowerCase();
     if (!shopKey) return false;
     if (seenShops.has(shopKey)) return false;
     if (collected.find(x => x.id === p.id || x.item_url === p.item_url)) return false;
+    const code = extractItemCode(p.item_url);
+    if (code) {
+      if (blockedItemCodes.has(code)) return false;
+      if (seenItemCodes.has(code)) return false;
+      seenItemCodes.add(code);
+    }
     seenShops.add(shopKey);
     collected.push({ ...p, strategy_tag: tag });
     return true;
   }
 
-  // Phase 1: Reserved keyword slots
-  const seasonalKws = tuning.seasonal?.keywords || [];
-  const evergreenKws = tuning.evergreen?.keywords || [];
-  const allReservedKws = [
-    ...seasonalKws.map(k => ({ keyword: k, tag: 'seasonal' })),
-    ...evergreenKws.map(k => ({ keyword: k, tag: 'evergreen' })),
-  ];
-  const reservedSlots = Math.min(2, toPost, allReservedKws.length);
-
-  if (reservedSlots > 0) {
-    const picked = allReservedKws.sort(() => Math.random() - 0.5).slice(0, reservedSlots);
-    for (const { keyword, tag } of picked) {
-      if (collected.length >= reservedSlots) break;
-      try {
-        const kwProducts = await searchProductsAPI(keyword, { maxResults: 5, maxPerShop: 1 });
-        for (const p of kwProducts) {
-          if (collected.length >= reservedSlots) break;
-          pushIfNew(p, `${tag}:${keyword}`);
-        }
-      } catch (err) {
-        console.error(`[get-products] ${tag} search failed "${keyword}": ${err.message}`);
-      }
-      await new Promise(r => setTimeout(r, 1500));
-    }
-  }
-
+  // 商品発見は collect-products ジョブ (JST 06:00) に分離済み。
+  // 投稿時は DB の既存在庫から選定するのみ。
   // Phase 2: Genre slots
-  const genreSlots = toPost - collected.length;
+  const genreSlots = toPost;
   if (genreSlots > 0) {
     const boostSet = new Set((tuning.genre?.boost || []).map(n => n.toLowerCase()));
     const reduceSet = new Set((tuning.genre?.reduce || []).map(n => n.toLowerCase()));
@@ -128,19 +131,28 @@ async function main() {
     for (const genre of pickedGenres) {
       if (collected.length >= toPost) break;
 
-      let pool = getUnpostedProductsByGenre(genre.genre_id, 8, 1, priceFilter);
-      if (pool.length === 0 && (priceFilter.priceMin || priceFilter.priceMax)) {
+      let pool = filterPool(getUnpostedProductsByGenre(genre.genre_id, 8, 1, productFilter));
+      // Widen 1: relax price band (keep review filter)
+      if (pool.length === 0 && (productFilter.priceMin || productFilter.priceMax)) {
         const widened = {
-          priceMin: priceFilter.priceMin ? Math.floor(priceFilter.priceMin * 0.5) : undefined,
-          priceMax: priceFilter.priceMax ? Math.ceil(priceFilter.priceMax * 2) : undefined,
+          ...productFilter,
+          priceMin: productFilter.priceMin ? Math.floor(productFilter.priceMin * 0.5) : undefined,
+          priceMax: productFilter.priceMax ? Math.ceil(productFilter.priceMax * 2) : undefined,
         };
-        pool = getUnpostedProductsByGenre(genre.genre_id, 8, 1, widened);
+        pool = filterPool(getUnpostedProductsByGenre(genre.genre_id, 8, 1, widened));
+      }
+      // Widen 2: drop review filter (keep price band)
+      if (pool.length === 0 && (productFilter.minReviewCount || productFilter.minReviewAverage)) {
+        pool = filterPool(getUnpostedProductsByGenre(genre.genre_id, 8, 1, {
+          priceMin: productFilter.priceMin,
+          priceMax: productFilter.priceMax,
+        }));
       }
       if (pool.length === 0) {
         try {
           await fetchRanking({ genreId: genre.genre_id, maxResults: 15 });
-          pool = getUnpostedProductsByGenre(genre.genre_id, 8, 1, priceFilter);
-          if (pool.length === 0) pool = getUnpostedProductsByGenre(genre.genre_id, 8);
+          pool = filterPool(getUnpostedProductsByGenre(genre.genre_id, 8, 1, productFilter));
+          if (pool.length === 0) pool = filterPool(getUnpostedProductsByGenre(genre.genre_id, 8));
         } catch (err) {
           console.error(`[get-products] ranking fetch failed for ${genre.genre_name}: ${err.message}`);
         }
@@ -160,7 +172,7 @@ async function main() {
 
   // Phase 3: Fallback
   if (collected.length < toPost) {
-    const fallback = getUnpostedProducts((toPost - collected.length) * 4);
+    const fallback = filterPool(getUnpostedProducts((toPost - collected.length) * 4));
     for (const p of fallback) {
       if (collected.length >= toPost) break;
       const gc = genrePostCounts.get(p.genre_id) || 0;

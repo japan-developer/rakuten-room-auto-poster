@@ -81,7 +81,7 @@ function saveWithDiversity(items, keywordUsed, maxResults, maxPerShop, genreId) 
       review_count: item.reviewCount || null,
     };
 
-    upsertProduct(product);
+    product.id = upsertProduct(product);
     products.push(product);
     shopCount.set(shopName, (shopCount.get(shopName) || 0) + 1);
   }
@@ -164,7 +164,7 @@ async function searchProductsScrape(keyword, { maxResults = 20, maxPerShop = 1 }
             category: null,
             image_url: null,
           };
-          upsertProduct(product);
+          product.id = upsertProduct(product);
           products.push(product);
           if (shopName) shopCount.set(shopName, (shopCount.get(shopName) || 0) + 1);
         }

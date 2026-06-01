@@ -41,6 +41,7 @@ const commands = {
   ranking: cmdRanking,
   post: cmdPost,
   collect: cmdCollect,
+  'collect-products': cmdCollectProducts,
   engage: cmdEngage,
   analyze: cmdAnalyze,
   status: cmdStatus,
@@ -107,6 +108,20 @@ async function cmdCollect() {
   const screenshotOnly = args.includes('--screenshot-only');
   const result = await collectReports({ screenshotOnly });
   console.log(`\nCollected: ${result.clicks.count} click records, ${result.orders.count} order records`);
+}
+
+async function cmdCollectProducts() {
+  return new Promise((resolve, reject) => {
+    const child = spawn('node', ['scripts/collect-products.mjs'], {
+      cwd: ROOT,
+      stdio: 'inherit',
+    });
+    child.on('exit', code => {
+      if (code === 0) resolve();
+      else reject(new Error(`collect-products exited with code ${code}`));
+    });
+    child.on('error', reject);
+  });
 }
 
 async function cmdEngage() {

@@ -91,12 +91,13 @@ try { db.exec(`ALTER TABLE products ADD COLUMN catchcopy TEXT`); } catch {}
 try { db.exec(`ALTER TABLE products ADD COLUMN description TEXT`); } catch {}
 try { db.exec(`ALTER TABLE products ADD COLUMN review_average REAL`); } catch {}
 try { db.exec(`ALTER TABLE products ADD COLUMN review_count INTEGER`); } catch {}
+try { db.exec(`ALTER TABLE products ADD COLUMN sold_out INTEGER DEFAULT 0`); } catch {}
 
 // --- Data Access ---
 
 // Products
 export function upsertProduct({ item_url, item_name, shop_name, shop_display_name, price, keyword_used, category, image_url, genre_id, catchcopy, description, review_average, review_count }) {
-  return db.prepare(`
+  const row = db.prepare(`
     INSERT INTO products (item_url, item_name, shop_name, shop_display_name, price, keyword_used, category, image_url, genre_id, catchcopy, description, review_average, review_count)
     VALUES (@item_url, @item_name, @shop_name, @shop_display_name, @price, @keyword_used, @category, @image_url, @genre_id, @catchcopy, @description, @review_average, @review_count)
     ON CONFLICT(item_url) DO UPDATE SET
@@ -109,18 +110,34 @@ export function upsertProduct({ item_url, item_name, shop_name, shop_display_nam
       description = COALESCE(excluded.description, products.description),
       review_average = COALESCE(excluded.review_average, products.review_average),
       review_count = COALESCE(excluded.review_count, products.review_count)
-  `).run({ item_url, item_name, shop_name, shop_display_name: shop_display_name || null, price, keyword_used, category, image_url, genre_id: genre_id || 'all', catchcopy: catchcopy || null, description: description || null, review_average: review_average || null, review_count: review_count || null });
+    RETURNING id
+  `).get({ item_url, item_name, shop_name, shop_display_name: shop_display_name || null, price, keyword_used, category, image_url, genre_id: genre_id || 'all', catchcopy: catchcopy || null, description: description || null, review_average: review_average || null, review_count: review_count || null });
+  return row?.id;
 }
 
-export function getUnpostedProducts(limit = 10, maxPerShop = 1) {
+export function getUnpostedProducts(limit = 10, maxPerShop = 1, { minReviewCount, minReviewAverage } = {}) {
+  let reviewFilter = '';
+  const params = [];
+  if (minReviewCount != null) {
+    reviewFilter += ' AND review_count IS NOT NULL AND review_count >= ?';
+    params.push(minReviewCount);
+  }
+  if (minReviewAverage != null) {
+    reviewFilter += ' AND review_average IS NOT NULL AND review_average >= ?';
+    params.push(minReviewAverage);
+  }
+  params.push(maxPerShop, limit);
+
   return db.prepare(`
     SELECT * FROM (
       SELECT *, ROW_NUMBER() OVER (PARTITION BY shop_name ORDER BY discovered_at DESC) AS rn
       FROM products
       WHERE posted = 0
+        AND sold_out = 0
         AND shop_name NOT LIKE '%kobo%'
         AND shop_name NOT LIKE '%ebook%'
         AND shop_name != 'book'
+        ${reviewFilter}
         AND shop_name NOT IN (
           SELECT DISTINCT pr.shop_name
           FROM posts p JOIN products pr ON p.product_id = pr.id
@@ -129,11 +146,51 @@ export function getUnpostedProducts(limit = 10, maxPerShop = 1) {
     ) WHERE rn <= ?
     ORDER BY discovered_at DESC
     LIMIT ?
-  `).all(maxPerShop, limit);
+  `).all(...params);
 }
 
 export function markProductPosted(productId) {
   return db.prepare(`UPDATE products SET posted = 1 WHERE id = ?`).run(productId);
+}
+
+// ROOM canonical itemcode (shop:code) を item_url から抽出
+// ROOMの "コレ" 重複判定はこの単位なので、選定時の予防除外に使う
+export function extractItemCode(itemUrl) {
+  if (!itemUrl) return null;
+  const m = itemUrl.match(/item\.rakuten\.co\.jp\/([^\/]+)\/([^\/?#]+)/);
+  return m ? `${m[1]}:${m[2]}` : null;
+}
+
+export function getPostedItemCodes() {
+  const rows = db.prepare(`SELECT DISTINCT item_url FROM products WHERE posted = 1`).all();
+  const set = new Set();
+  for (const r of rows) {
+    const code = extractItemCode(r.item_url);
+    if (code) set.add(code);
+  }
+  return set;
+}
+
+// collect-products ジョブで使用: active なキーワードを「未使用優先 → 最古使用順」で取得
+// 既存の getActiveKeywords() (score 降順、全件) とは選定軸が異なるため別関数
+export function getKeywordsForCollect(limit = 5) {
+  return db.prepare(`
+    SELECT id, keyword, category, score, last_used FROM keyword_pool
+    WHERE active = 1
+    ORDER BY
+      CASE WHEN last_used IS NULL THEN 0 ELSE 1 END,
+      last_used ASC,
+      score DESC
+    LIMIT ?
+  `).all(limit);
+}
+
+export function updateKeywordLastUsed(id) {
+  return db.prepare(`UPDATE keyword_pool SET last_used = datetime('now') WHERE id = ?`).run(id);
+}
+
+export function markProductSoldOut(productId) {
+  return db.prepare(`UPDATE products SET sold_out = 1 WHERE id = ?`).run(productId);
 }
 
 // Posts
@@ -349,16 +406,24 @@ export function markGenreFetched(genreId) {
   `).run(genreId);
 }
 
-export function getUnpostedProductsByGenre(genreId, limit = 10, maxPerShop = 1, { priceMin, priceMax } = {}) {
-  let priceFilter = '';
+export function getUnpostedProductsByGenre(genreId, limit = 10, maxPerShop = 1, { priceMin, priceMax, minReviewCount, minReviewAverage } = {}) {
+  let extraFilter = '';
   const params = [genreId];
   if (priceMin != null) {
-    priceFilter += ' AND price >= ?';
+    extraFilter += ' AND price >= ?';
     params.push(priceMin);
   }
   if (priceMax != null) {
-    priceFilter += ' AND price <= ?';
+    extraFilter += ' AND price <= ?';
     params.push(priceMax);
+  }
+  if (minReviewCount != null) {
+    extraFilter += ' AND review_count IS NOT NULL AND review_count >= ?';
+    params.push(minReviewCount);
+  }
+  if (minReviewAverage != null) {
+    extraFilter += ' AND review_average IS NOT NULL AND review_average >= ?';
+    params.push(minReviewAverage);
   }
   params.push(maxPerShop, limit);
 
@@ -367,11 +432,12 @@ export function getUnpostedProductsByGenre(genreId, limit = 10, maxPerShop = 1, 
       SELECT *, ROW_NUMBER() OVER (PARTITION BY shop_name ORDER BY discovered_at DESC) AS rn
       FROM products
       WHERE posted = 0
+        AND sold_out = 0
         AND genre_id = ?
         AND shop_name NOT LIKE '%kobo%'
         AND shop_name NOT LIKE '%ebook%'
         AND shop_name != 'book'
-        ${priceFilter}
+        ${extraFilter}
         AND shop_name NOT IN (
           SELECT DISTINCT pr.shop_name
           FROM posts p JOIN products pr ON p.product_id = pr.id

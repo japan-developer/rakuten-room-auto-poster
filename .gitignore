@@ -39,3 +39,6 @@ launchd/*.log
 # 一時ファイル
 /tmp/batch-*.json
 *.tmp
+
+# Claude Code ランタイムロック
+.claude/*.lock

@@ -41,22 +41,29 @@ Bash: node scripts/get-products.mjs --count <N>
 出力 JSON の `products` 配列を内部メモリに保持する。
 **ショップ重複チェック**: `shop_display_name || shop_name` で同一があれば即停止して報告。
 
-### Step 4: コメント生成
+### Step 4: バッチファイル初期化
 
-各商品について:
+まず `/tmp/batch-<unix_ts>.json` を空の `items: []` で作成する:
 
-- `rakuten-room-comment` の構造 (フック → 体験 → クロージング) で生成
-- 80-160 字、絵文字 1-3 個 (tuning に従う)
-- ペルソナの口調・絵文字・Do/Don'tを厳守
-- 同一バッチ内でフック・言い回しを重複させない
-- 商品名は装飾を剥がして 40 字以内に丸める
-- `catchcopy`, `description` がある場合は素材・機能・特徴を抽出してコメントに自然に織り込む
+```json
+{ "items": [] }
+```
 
-ハッシュタグも `hashtag-strategy` に従って 4-6 個生成。
+`Write` ツールで作成。`<unix_ts>` は秒単位の現在時刻。
 
-### Step 5: バッチファイル書き出し
+### Step 5: 商品ごとに生成して即追記 (逐次)
 
-`/tmp/batch-<unix_ts>.json` に以下を書く:
+**重要**: 7件まとめて頭の中で作らない。**1件生成 → 即 Edit でバッチに追記** を 7 回繰り返す。これは long-thinking ループによる kill timer タイムアウトを防ぐための強制制約。
+
+各商品について順番に:
+
+1. その1商品のコメント (80-160字、絵文字 tuning に従う) とハッシュタグ (4-6個) を生成
+   - `rakuten-room-comment` の構造 (フック → 体験 → クロージング)
+   - ペルソナの口調・絵文字・Do/Don't を厳守
+   - 商品名の装飾を剥がし 40 字以内に丸める
+   - `catchcopy`, `description` から素材・機能・特徴を抽出して自然に織り込む
+   - 既に書いた商品とフック・言い回しが重複しないこと (会話履歴から確認)
+2. 即 `Edit` でバッチ JSON の `items` 配列にこの1件を追記:
 
 ```json
 {
@@ -71,7 +78,7 @@ Bash: node scripts/get-products.mjs --count <N>
 }
 ```
 
-`Write` ツールで作成。
+7件全部追記し終わったら Step 6 へ。**頭の中で7件全部作ってから一気に Write してはいけない**。
 
 ### Step 6: 投稿
 
@@ -83,12 +90,29 @@ Bash: node scripts/post-batch.mjs --file /tmp/batch-<unix_ts>.json
 
 `timeout: 1500000` (25 分) を Bash に渡すこと。
 
-### Step 7: 報告
+### Step 7: 不足分の補填投稿 (1 ラウンドのみ)
+
+post-batch の出力 JSON は `{"posted": N, "failed": M, "sold_out": K, "requested": R, "results": [...]}` 形式。
+
+**shortfall = requested - posted** を計算し、shortfall > 0 ならもう 1 ラウンドだけ追加投稿する:
+
+1. `Bash: node scripts/get-products.mjs --count <shortfall>` で追加商品取得 (DB 側で「今日既に投稿したショップ」は自動除外されるので shop 重複は気にしなくて良い)
+2. `Write` で空の `/tmp/batch-<unix_ts>-retry.json` を作成 (`{"items": []}`)
+3. 商品ごとに Step 5 と同じ逐次追記 (1件生成 → 即 Edit でバッチに追加) を shortfall 件ぶん繰り返す
+4. `Bash: node scripts/post-batch.mjs --file /tmp/batch-<unix_ts>-retry.json` で投稿 (timeout 1500000)
+
+**重要**:
+- 補填は **1 回限り**。retry の retry はやらない
+- shortfall = 0 の場合 (全件成功) はこのステップをスキップして Step 8 へ
+- 取得した追加商品数が shortfall に届かなくても (在庫不足等) 、取れた分だけで投稿して進む
+- このステップに到達できなかった場合 (kill timer で死んだ等) は backfill されない。これは仕様
+
+### Step 8: 報告
 
 最後に **1 行だけ** 次の JSON を出力:
 
 ```json
-{"posted": <成功数>, "failed": <失敗数>, "log": "<post-batch の生出力 path or summary>"}
+{"posted": <初回+補填の合計成功数>, "failed": <合計失敗数>, "sold_out": <合計売切数>, "requested": <初回 requested>, "log": "<post-batch の生出力 path or summary>"}
 ```
 
 それ以外のテキストは出力しない。

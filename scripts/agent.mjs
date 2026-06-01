@@ -28,6 +28,7 @@ const ROLE_CONFIG = {
     permissionMode: 'acceptEdits',
     allowedTools: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep'],
     verbose: true,
+    model: 'claude-opus-4-6',
   },
   review: {
     promptFile: 'prompts/agent-review.md',
@@ -156,6 +157,7 @@ async function main() {
     '--tools', cfg.allowedTools.join(','),
     '--strict-mcp-config',
   ];
+  if (cfg.model) args.push('--model', cfg.model);
   if (cfg.verbose) args.push('--verbose');
 
   const promptText = fs.readFileSync(promptPath, 'utf-8')

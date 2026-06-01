@@ -70,6 +70,7 @@ export const config = {
   },
 
   // Initial genre pool for ranking-based strategy
+  // ID と name は楽天 Ranking API の title で実機検証済み (2026-05-04)
   genres: [
     { id: '100227', name: '食品' },
     { id: '100938', name: 'ダイエット・健康' },
@@ -83,7 +84,13 @@ export const config = {
     { id: '564500', name: 'スマートフォン・タブレット' },
     { id: '551167', name: 'スイーツ・お菓子' },
     { id: '211742', name: 'TV・オーディオ・カメラ' },
+    { id: '100026', name: 'パソコン・周辺機器' },
   ],
+
+  // ペルソナと不適合のため取得・投稿から除外する genre_id (Phase 3 fallback でも弾く)
+  // 100371=レディースファッション, 100533=キッズ・ベビー・マタニティ,
+  // 100433=インナー・下着・ナイトウェア, 100939=美容・コスメ・香水
+  excludedGenreIds: ['100371', '100533', '100433', '100939'],
 
   // Schedule (UTC — JST-9)
   schedule: {
